@@ -1,0 +1,22 @@
+# Environment
+.env
+
+# Raw data — gitignored; only committed fixtures go in data/samples/
+data/raw/
+data/pipeline.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
