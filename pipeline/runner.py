@@ -56,7 +56,10 @@ def run(source: str = "careerjet") -> None:
     # Stage 5 — Snowflake Load
     log.info("[5/6] Snowflake Load")
     from pipeline.modeling.snowflake_loader import load_to_snowflake
-    loaded_count = load_to_snowflake(validated)
+    loaded_count, failed = load_to_snowflake(validated)
+    if failed:
+        for raw_id, err in failed:
+            log.warning("  Load failure: raw_id=%s error=%s", raw_id, err)
 
     log.info("[6/6] Done — %d records loaded to Snowflake", loaded_count)
     log.info("Run %s completed in %.1fs", run_id,
