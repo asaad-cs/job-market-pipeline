@@ -45,3 +45,18 @@ CREATE INDEX IF NOT EXISTS idx_quality_log_job
 
 CREATE INDEX IF NOT EXISTS idx_quality_log_rule
     ON quality_log(rule_name);
+
+-- Tracks fingerprints of every non-duplicate record that has passed through
+-- the pipeline. Used for cross-run deduplication when a source (e.g. Careerjet)
+-- has no native source_job_id. Populated by deduplicator.py after each run.
+-- Fingerprints from sources with native IDs are recorded here too, enabling
+-- uniform cross-source dedup via Stage 3 when a second source is added.
+CREATE TABLE IF NOT EXISTS processed_fingerprints (
+    fingerprint  TEXT      PRIMARY KEY,
+    first_raw_id TEXT      NOT NULL,
+    source_name  TEXT      NOT NULL,
+    recorded_at  TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_processed_fp_source
+    ON processed_fingerprints(source_name);

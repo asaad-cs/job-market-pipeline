@@ -20,3 +20,14 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# One-off debug / audit / verification scripts (not part of the pipeline)
+check_db.py
+collision_audit.py
+debug_locations.py
+export_sample.py
+phase1_test.py
+profile_phase2.py
+repeatability_test.py
+sf_insert_probe.py
+verify_phase4.py

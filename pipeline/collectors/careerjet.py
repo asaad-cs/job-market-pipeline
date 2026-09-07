@@ -24,17 +24,22 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-BASE_URL = "https://public.api.careerjet.net/search"
+BASE_URL = "http://public.api.careerjet.net/search"   # HTTP — port 443 is closed on this host
 
-# Confirmed after first test pull; update if Saudi Arabia uses a different locale
+# Confirmed in Phase 1 test pull (2026-09-06)
 SAUDI_LOCALE = "en_SA"
 SAUDI_LOCATION = "Saudi Arabia"
+
+# The API returns 403 without a Referer header matching a declared domain.
+# https://www.careerjet.com.sa/ was confirmed accepted in Phase 1 test.
+# Set CAREERJET_REFERRER in .env to override.
+DEFAULT_REFERRER = "https://www.careerjet.com.sa/"
 
 # Conservative rate limit: 1 request per 2 seconds
 REQUEST_DELAY_SECONDS = 2
 
-# Results per page (Careerjet max is 99; using 20 for safe initial testing)
-PAGE_SIZE = 20
+# Results per page — Careerjet maximum is 99
+PAGE_SIZE = 99
 
 
 def _api_key() -> str:
@@ -47,18 +52,28 @@ def _api_key() -> str:
     return key
 
 
-def _fetch_page(affid: str, page: int, keywords: str = "") -> dict:
+def _get_public_ip() -> str:
+    try:
+        r = requests.get("https://api.ipify.org?format=json", timeout=10)
+        return r.json()["ip"]
+    except Exception:
+        return "127.0.0.1"
+
+
+def _fetch_page(affid: str, page: int, keywords: str = "", user_ip: str = "127.0.0.1") -> dict:
+    referrer = os.getenv("CAREERJET_REFERRER", DEFAULT_REFERRER).strip() or DEFAULT_REFERRER
     params = {
         "affid": affid,
-        "user_ip": "127.0.0.1",   # placeholder: replace with real user IP if required by ToS
-        "user_agent": "JobMarketPipeline/0.1 (capstone research; contact: Ahmed.s.alfaidi@gmail.com)",
+        "user_ip": user_ip,
+        "user_agent": "Mozilla/5.0 (compatible; JobMarketPipeline/0.1)",
         "keywords": keywords,
         "location": SAUDI_LOCATION,
         "locale_code": SAUDI_LOCALE,
         "pagesize": PAGE_SIZE,
         "page": page,
     }
-    response = requests.get(BASE_URL, params=params, timeout=15)
+    headers = {"Referer": referrer}
+    response = requests.get(BASE_URL, params=params, headers=headers, timeout=15)
     response.raise_for_status()
     return response.json()
 
@@ -72,15 +87,16 @@ def collect(run_id: str, max_pages: int = 25, keywords: str = "") -> list[dict]:
     Returns a list of raw record dicts ready for the Cleaning stage.
     """
     affid = _api_key()
+    user_ip = _get_public_ip()
     raw_records = []
     collected_at = datetime.now(timezone.utc).isoformat()
 
-    log.info("Careerjet collect starting (run_id=%s, max_pages=%d)", run_id, max_pages)
+    log.info("Careerjet collect starting (run_id=%s, max_pages=%d, ip=%s)", run_id, max_pages, user_ip)
 
     for page in range(1, max_pages + 1):
         log.debug("Fetching page %d", page)
         try:
-            data = _fetch_page(affid, page=page, keywords=keywords)
+            data = _fetch_page(affid, page=page, keywords=keywords, user_ip=user_ip)
         except requests.HTTPError as exc:
             log.error("HTTP error on page %d: %s", page, exc)
             break

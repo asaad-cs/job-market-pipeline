@@ -62,12 +62,16 @@ def _warn(rec: dict, rule: str, severity: str, message: str) -> None:
 def _parse_date(val: str | None) -> datetime | None:
     if not val:
         return None
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
-        try:
-            return datetime.strptime(val.split(".")[0].rstrip("Z"), fmt.rstrip("Z")).replace(tzinfo=timezone.utc)
-        except (ValueError, AttributeError):
-            continue
-    return None
+    try:
+        dt = datetime.fromisoformat(val)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
+    # Fallback for bare date strings
+    try:
+        return datetime.strptime(val[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 
 def validate(records: list[dict]) -> list[dict]:

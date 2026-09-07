@@ -33,7 +33,7 @@ def sample_raw_record():
         "source_name": "careerjet",
         "source_job_id": None,
         "source_url": "https://www.careerjet.com/jobad/sa12345",
-        "raw_payload": '{"title": "Software Engineer (SAUDI NATIONAL)", "company": "ADDAR GROUP", '
+        "raw_payload": '{"title": "Software Engineer (SAUDI NATIONAL)", "company": "Hilton Hotels", '
                        '"locations": "Riyadh, Saudi Arabia", "description": "We are hiring a software engineer.", '
                        '"date": "2026-08-01", "url": "https://www.careerjet.com/jobad/sa12345"}',
         "collected_at": "2026-09-05T00:00:00+00:00",

@@ -88,7 +88,7 @@ def _ensure_table(conn) -> None:
     conn.cursor().execute(_CREATE_JOBS_TABLE)
 
 
-def _to_row(rec: dict) -> tuple:
+def _to_row(rec: dict, processed_at: str) -> tuple:
     return (
         str(uuid.uuid4()),                          # job_id
         rec.get("raw_id"),
@@ -117,7 +117,7 @@ def _to_row(rec: dict) -> tuple:
         rec.get("expiry_date"),
         bool(rec.get("saudi_national_only", False)),
         rec.get("collected_at"),
-        datetime.now(timezone.utc).isoformat(),     # processed_at
+        processed_at,
         bool(rec.get("is_duplicate", False)),
         rec.get("duplicate_of_job_id"),
         json.dumps(rec.get("quality_flags", [])),   # stored as VARIANT in Snowflake
@@ -136,13 +136,17 @@ INSERT INTO jobs (
     description, posting_date, expiry_date,
     saudi_national_only, collected_at, processed_at,
     is_duplicate, duplicate_of_job_id, quality_flags, is_rejected, rejection_reason
-) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+)
+SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,PARSE_JSON(%s),%s,%s
 """
 
 
 def load_to_snowflake(records: list[dict]) -> int:
     """
     Load non-duplicate, non-rejected records to Snowflake jobs table.
+    Uses individual execute() calls per row so PARSE_JSON() works for the
+    VARIANT quality_flags column (executemany can't mix function calls into
+    its multi-row rewrite optimization).
     Returns the count of records successfully inserted.
     """
     to_load = [r for r in records if not r.get("is_rejected") and not r.get("is_duplicate")]
@@ -150,14 +154,25 @@ def load_to_snowflake(records: list[dict]) -> int:
         log.info("No records to load to Snowflake (all duplicates or rejected)")
         return 0
 
+    processed_at = datetime.now(timezone.utc).isoformat()
     conn = _get_snowflake_conn()
     try:
         _ensure_table(conn)
-        rows = [_to_row(r) for r in to_load]
         cur = conn.cursor()
-        cur.executemany(_INSERT_SQL, rows)
+        inserted = 0
+        failed: list[tuple[str, str]] = []  # (raw_id, error)
+        for rec in to_load:
+            try:
+                cur.execute(_INSERT_SQL, _to_row(rec, processed_at))
+                inserted += 1
+            except Exception as e:
+                failed.append((rec.get("raw_id", "?"), str(e)))
         conn.commit()
-        log.info("Loaded %d records to Snowflake jobs table", len(rows))
-        return len(rows)
+        if failed:
+            log.warning("%d records failed to insert:", len(failed))
+            for raw_id, err in failed:
+                log.warning("  raw_id=%s  error=%s", raw_id, err)
+        log.info("Loaded %d/%d records to Snowflake jobs table", inserted, len(to_load))
+        return inserted, failed
     finally:
         conn.close()
