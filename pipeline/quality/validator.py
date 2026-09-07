@@ -127,6 +127,15 @@ def validate(records: list[dict]) -> list[dict]:
         if not rec.get("posting_date"):
             _warn(rec, "WARN-004", "info", "posting_date is null")
 
+        # WARN-005
+        fp_components = [rec.get("title"), rec.get("company_name"), rec.get("location_city")]
+        null_count = sum(1 for c in fp_components if not c)
+        if null_count >= 2:
+            _warn(rec, "WARN-005", "warning",
+                  f"low-confidence fingerprint: {null_count}/3 fingerprint components "
+                  f"(title, company_name, location_city) are null/empty — "
+                  "deduplication reliability is degraded for this record")
+
         # ERR-001
         if posting_date and collected_at and posting_date > collected_at:
             _warn(rec, "ERR-001", "error", f"posting_date {rec['posting_date']} is in the future")

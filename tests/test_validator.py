@@ -104,3 +104,20 @@ class TestErrorFlags:
         [result] = validate([rec])
         rules = [f["rule"] for f in result["quality_flags"]]
         assert "ERR-001" in rules
+
+
+class TestLowConfidenceFingerprint:
+    def test_null_company_and_city_flags_warn005(self):
+        # 2 of 3 fingerprint components null → LOW-CONFIDENCE-FINGERPRINT
+        rec = _base_record(company_name=None, location_city=None)
+        [result] = validate([rec])
+        rules = [f["rule"] for f in result["quality_flags"]]
+        assert "WARN-005" in rules
+        assert result["is_rejected"] is False  # flagged, not rejected
+
+    def test_only_one_null_component_does_not_flag_warn005(self):
+        # 1 of 3 null (company only) → still 2 components present → no flag
+        rec = _base_record(company_name=None, location_city="Riyadh")
+        [result] = validate([rec])
+        rules = [f["rule"] for f in result["quality_flags"]]
+        assert "WARN-005" not in rules
