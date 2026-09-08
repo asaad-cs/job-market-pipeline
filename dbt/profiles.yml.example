@@ -1,0 +1,32 @@
+# dbt connection profile — TEMPLATE ONLY
+#
+# Copy this file to profiles.yml (same directory) and dbt will use it.
+# profiles.yml is gitignored — never commit it.
+#
+# All values use env_var() — no credentials are hardcoded here.
+# dbt reads env_var() from the shell environment, NOT from .env directly.
+# Before running any dbt command, load your .env vars into the shell:
+#
+#   PowerShell (Windows):
+#     Get-Content ../.env | Where-Object { $_ -notmatch '^\s*#' -and $_ -match '=' } |
+#       ForEach-Object { $k,$v = $_ -split '=',2;
+#         [Environment]::SetEnvironmentVariable($k.Trim(),$v.Trim(),'Process') }
+#
+#   Or use the helper script in this directory:
+#     .\dbt_run.ps1 run
+#
+# The profile name here must match 'profile:' in dbt_project.yml.
+
+job_market_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account:   "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user:      "{{ env_var('SNOWFLAKE_USER') }}"
+      password:  "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
+      database:  "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      schema:    PUBLIC        # dbt default schema; overridden per-model in dbt_project.yml
+      threads:   4
+      client_session_keep_alive: false

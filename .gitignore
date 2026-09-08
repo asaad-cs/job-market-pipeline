@@ -1,5 +1,12 @@
-# Environment
+# Environment / credentials — never commit real values
 .env
+dbt/profiles.yml
+
+# dbt runtime artifacts
+dbt/logs/
+dbt/.user.yml
+dbt/job_market_pipeline/target/
+dbt/job_market_pipeline/dbt_packages/
 
 # Raw data — gitignored; only committed fixtures go in data/samples/
 data/raw/

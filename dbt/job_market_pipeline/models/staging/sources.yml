@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Raw Careerjet data landed from SQLite into Snowflake by
+      scripts/land_raw_to_snowflake.py. No transformations applied —
+      raw_payload is stored as VARIANT for direct path-syntax access.
+    database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+    schema: RAW
+    tables:
+      - name: raw_jobs
+        description: >
+          One row per collected job posting. raw_payload contains the
+          full Careerjet API response object (keys: title, company,
+          locations, description, salary, url, date, site).
+        columns:
+          - name: raw_id
+            description: UUID assigned at collection time — primary key.
+          - name: run_id
+            description: FK to collection_runs.run_id.
+          - name: source_name
+            description: Always 'careerjet' for this source.
+          - name: source_job_id
+            description: Always NULL for Careerjet (no native job ID).
+          - name: source_url
+            description: Careerjet jobviewtrack.com affiliate redirect URL.
+          - name: raw_payload
+            description: Full API response as Snowflake VARIANT.
+          - name: collected_at
+            description: ISO-8601 timestamp when the record was collected.
+
+      - name: collection_runs
+        description: One row per pipeline collection run.
+        columns:
+          - name: run_id
+            description: UUID — primary key.
+          - name: started_at
+            description: ISO-8601 timestamp.
+          - name: completed_at
+            description: ISO-8601 timestamp.
+          - name: source_name
+            description: Data source name.
+          - name: records_fetched
+            description: Number of raw records written for this run.
+          - name: notes
+            description: Free-text notes about the run.
