@@ -18,14 +18,15 @@ from pipeline.processing.deduplicator import deduplicate
 from pipeline.quality.validator import validate, flush_quality_log
 
 DB_PATH = "./data/pipeline.db"
-RUN_ID_PREFIX = "685d09d4"
 
 # ── Load raw records ──────────────────────────────────────────────────────────
 conn = sqlite3.connect(DB_PATH)
-run_id = conn.execute(
-    "SELECT run_id FROM collection_runs WHERE run_id LIKE ?",
-    (RUN_ID_PREFIX + "%",)
-).fetchone()[0]
+row = conn.execute(
+    "SELECT run_id FROM collection_runs ORDER BY started_at DESC LIMIT 1"
+).fetchone()
+if not row:
+    sys.exit("ERROR: No collection runs found in DB. Run collect_full.py first.")
+run_id = row[0]
 rows = conn.execute(
     "SELECT raw_id, run_id, source_name, source_job_id, source_url, raw_payload, collected_at "
     "FROM raw_jobs WHERE run_id=?", (run_id,)
