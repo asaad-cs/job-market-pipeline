@@ -51,6 +51,42 @@ Careerjet Partner API  (primary source — locale_code=en_SA)
 
 ---
 
+## dbt Transformation Layer (Medallion Architecture)
+
+The pipeline includes a dbt project (`dbt/job_market_pipeline/`) that replicates and supersedes the Python processing stages (cleaner/standardizer/deduplicator/validator) as SQL transformations in Snowflake.
+
+### Snowflake schema layout
+
+| Layer | Schema | dbt models | Contents |
+|---|---|---|---|
+| **Bronze** | `BRONZE` | *(source, not a dbt model)* | Raw VARIANT payloads from Careerjet API — `raw_jobs` and `collection_runs` tables loaded by `scripts/land_raw_to_snowflake.py` |
+| **Silver** | `SILVER` | `stg_careerjet__raw_jobs`, `int_jobs_cleaned`, `int_jobs_standardized`, `int_jobs_deduplicated`, `int_jobs_quality_flags` | Field extraction, cleaning, standardization, dedup, quality flagging — all as views |
+| **Gold** | `GOLD` | `fct_jobs` | Non-duplicate, non-rejected curated records — materialized as a table |
+
+### Model chain
+
+```
+BRONZE.raw_jobs (source)
+    └─► SILVER.stg_careerjet__raw_jobs   (field extraction from VARIANT)
+            └─► SILVER.int_jobs_cleaned          (title/company/location/fingerprint)
+                    └─► SILVER.int_jobs_standardized   (career level, salary, out_of_region)
+                            └─► SILVER.int_jobs_deduplicated  (is_duplicate, duplicate_of_raw_id)
+                                    └─► SILVER.int_jobs_quality_flags (quality_flags, is_rejected)
+                                                └─► GOLD.fct_jobs  (829 curated records)
+```
+
+### Running the dbt models
+
+```bash
+cd dbt/job_market_pipeline
+dbt run          # build all 6 models
+dbt test         # run schema tests
+```
+
+Requires `dbt/profiles.yml` (gitignored — contains Snowflake credentials). See `.env.example` for the `SNOWFLAKE_*` variables used.
+
+---
+
 ## Repository Structure
 
 ```

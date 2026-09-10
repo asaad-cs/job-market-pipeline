@@ -1,14 +1,14 @@
 """
-Phase A — Land existing SQLite raw data into Snowflake RAW layer.
+Phase A — Land existing SQLite raw data into Snowflake BRONZE layer.
 
 Reads from data/pipeline.db (no API calls) and creates:
-  JOB_PIPELINE_DB.RAW.collection_runs   (4 rows)
-  JOB_PIPELINE_DB.RAW.raw_jobs          (1,109 rows)
+  JOB_PIPELINE_DB.BRONZE.collection_runs   (4 rows)
+  JOB_PIPELINE_DB.BRONZE.raw_jobs          (1,109 rows)
 
 raw_payload is stored as VARIANT (PARSE_JSON applied on insert) so that
 downstream dbt staging models can use Snowflake path syntax directly.
 
-Idempotency: aborts if RAW.raw_jobs already contains rows. To re-run from
+Idempotency: aborts if BRONZE.raw_jobs already contains rows. To re-run from
 scratch, TRUNCATE both tables first.
 """
 import io, os, sqlite3, sys
@@ -24,10 +24,10 @@ import snowflake.connector
 
 SQLITE_PATH = "./data/pipeline.db"
 
-_CREATE_RAW_SCHEMA = "CREATE SCHEMA IF NOT EXISTS RAW"
+_CREATE_RAW_SCHEMA = "CREATE SCHEMA IF NOT EXISTS BRONZE"
 
 _CREATE_COLLECTION_RUNS = """
-CREATE TABLE IF NOT EXISTS RAW.collection_runs (
+CREATE TABLE IF NOT EXISTS BRONZE.collection_runs (
     run_id          VARCHAR(36)   NOT NULL,
     started_at      VARCHAR(50),
     completed_at    VARCHAR(50),
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS RAW.collection_runs (
 """
 
 _CREATE_RAW_JOBS = """
-CREATE TABLE IF NOT EXISTS RAW.raw_jobs (
+CREATE TABLE IF NOT EXISTS BRONZE.raw_jobs (
     raw_id          VARCHAR(36)   NOT NULL,
     run_id          VARCHAR(36)   NOT NULL,
     source_name     VARCHAR(100)  NOT NULL,
@@ -50,13 +50,13 @@ CREATE TABLE IF NOT EXISTS RAW.raw_jobs (
 """
 
 _INSERT_COLLECTION_RUN = """
-INSERT INTO RAW.collection_runs
+INSERT INTO BRONZE.collection_runs
     (run_id, started_at, completed_at, source_name, records_fetched, notes)
 VALUES (%s, %s, %s, %s, %s, %s)
 """
 
 _INSERT_RAW_JOB = """
-INSERT INTO RAW.raw_jobs
+INSERT INTO BRONZE.raw_jobs
     (raw_id, run_id, source_name, source_job_id, source_url, raw_payload, collected_at)
 SELECT %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
 """
@@ -108,17 +108,17 @@ def main():
     cur = sf.cursor()
 
     # ── Step 3: Create RAW schema and tables ──────────────────────────────────
-    print("Creating RAW schema and tables if not exist...")
+    print("Creating BRONZE schema and tables if not exist...")
     cur.execute(_CREATE_RAW_SCHEMA)
     cur.execute(_CREATE_COLLECTION_RUNS)
     cur.execute(_CREATE_RAW_JOBS)
 
     # ── Step 4: Idempotency guard ─────────────────────────────────────────────
-    cur.execute("SELECT COUNT(*) FROM RAW.raw_jobs")
+    cur.execute("SELECT COUNT(*) FROM BRONZE.raw_jobs")
     existing = cur.fetchone()[0]
     if existing > 0:
-        print(f"\nABORT: RAW.raw_jobs already contains {existing} rows.")
-        print("To re-run: TRUNCATE TABLE RAW.raw_jobs; TRUNCATE TABLE RAW.collection_runs;")
+        print(f"\nABORT: BRONZE.raw_jobs already contains {existing} rows.")
+        print("To re-run: TRUNCATE TABLE BRONZE.raw_jobs; TRUNCATE TABLE BRONZE.collection_runs;")
         cur.close()
         sf.close()
         sys.exit(1)
@@ -152,20 +152,20 @@ def main():
     sf.commit()
 
     # ── Step 7: Verify ────────────────────────────────────────────────────────
-    cur.execute("SELECT COUNT(*) FROM RAW.collection_runs")
+    cur.execute("SELECT COUNT(*) FROM BRONZE.collection_runs")
     sf_run_count = cur.fetchone()[0]
 
-    cur.execute("SELECT COUNT(*) FROM RAW.raw_jobs")
+    cur.execute("SELECT COUNT(*) FROM BRONZE.raw_jobs")
     sf_raw_count = cur.fetchone()[0]
 
     cur.execute(
         "SELECT run_id, source_name, records_fetched, started_at "
-        "FROM RAW.collection_runs ORDER BY started_at"
+        "FROM BRONZE.collection_runs ORDER BY started_at"
     )
     sf_runs = cur.fetchall()
 
     cur.execute(
-        "SELECT run_id, COUNT(*) AS cnt FROM RAW.raw_jobs "
+        "SELECT run_id, COUNT(*) AS cnt FROM BRONZE.raw_jobs "
         "GROUP BY run_id ORDER BY MIN(collected_at)"
     )
     sf_per_run = cur.fetchall()
@@ -177,8 +177,8 @@ def main():
     print(f"\n{'=' * 55}")
     print("PHASE A — LANDING COMPLETE")
     print(f"{'=' * 55}")
-    print(f"  RAW.collection_runs : {sf_run_count} rows")
-    print(f"  RAW.raw_jobs        : {sf_raw_count} rows")
+    print(f"  BRONZE.collection_runs : {sf_run_count} rows")
+    print(f"  BRONZE.raw_jobs        : {sf_raw_count} rows")
     if failed:
         print(f"  FAILED              : {len(failed)} rows")
         for raw_id, err in failed:

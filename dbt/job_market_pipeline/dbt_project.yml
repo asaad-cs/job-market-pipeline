@@ -17,10 +17,10 @@ models:
   job_market_pipeline:
     staging:
       +materialized: view
-      +schema: STG
+      +schema: SILVER
     intermediate:
       +materialized: view
-      +schema: INT
+      +schema: SILVER
     marts:
       +materialized: table
-      +schema: MARTS
+      +schema: GOLD

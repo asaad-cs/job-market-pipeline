@@ -7,7 +7,7 @@ sources:
       scripts/land_raw_to_snowflake.py. No transformations applied —
       raw_payload is stored as VARIANT for direct path-syntax access.
     database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
-    schema: RAW
+    schema: BRONZE
     tables:
       - name: raw_jobs
         description: >
