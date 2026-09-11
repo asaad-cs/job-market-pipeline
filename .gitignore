@@ -38,3 +38,9 @@ profile_phase2.py
 repeatability_test.py
 sf_insert_probe.py
 verify_phase4.py
+
+# Tanqeeb iterative scratch/test scripts (superseded by scrape_tanqeeb.py)
+scripts/test_tanqeeb*.py
+
+# Log files (operational artifacts, not source)
+*.log
