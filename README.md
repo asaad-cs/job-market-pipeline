@@ -351,6 +351,22 @@ The Careerjet API returns a text excerpt (~242 character mean) rather than the
 full job description. This is sufficient for profiling but cannot support
 skills extraction or detailed NLP without fetching the detail page.
 
+### 6. Cross-source deduplication is designed but not empirically validated
+
+Cross-source deduplication logic exists — jobs from all three sources are matched
+via a shared SHA-256 fingerprint schema (`SHA-256(title | company_name | location_city)`)
+in `SILVER.int_jobs_deduplicated`. A job posted on both Tanqeeb and Jooble, for example,
+would receive the same fingerprint and be deduplicated correctly.
+
+However, this has not yet been empirically validated. In the current 325-record sample
+(~100 records per source), zero jobs appeared simultaneously across multiple sources, so
+no cross-source duplicate was actually caught and verified. All 8 deduplicated records
+were within-source collisions (repeated postings within the same source's own collection).
+
+This is expected at this sample size — genuine cross-source overlap is rare in a
+~100-record slice of each source's much larger corpus. The mechanism should be revisited
+and validated with a larger, intentionally overlapping dataset if the project scales.
+
 ---
 
 ## Source Evaluation
