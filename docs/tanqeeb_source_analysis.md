@@ -1,7 +1,8 @@
 # Tanqeeb Source Analysis
 **Investigated:** 2026-09-09  
 **URL:** https://saudi.tanqeeb.com  
-**Pipeline:** Saudi Job Market Data Pipeline
+**Pipeline:** Saudi Job Market Data Pipeline  
+**Approval status:** Approved for use — see §13
 
 ---
 
@@ -23,7 +24,7 @@ Relevant rules observed:
 - No disallow on `/jobs/with-salaries`
 - No `Crawl-delay` set
 
-**Implication:** Job detail pages at `/jobs-in-saudi/all/jobs/0{id}.html` are permitted. The `similar_jobs.php` BFS endpoint is technically disallowed by robots.txt. In the actual scraper, seed discovery was moved to permitted pages (`/jobs/with-salaries`, company search pages) and BFS expansion was limited to one extra level. Any production pipeline should not rely on the PHP API endpoints.
+**Implication:** Job detail pages at `/jobs-in-saudi/all/jobs/0{id}.html` are permitted. The `similar_jobs.php` BFS endpoint is technically disallowed by robots.txt. Use of this endpoint in the pipeline's seed discovery has been **explicitly approved by the project mentor on [DATE TBC]** for academic/capstone purposes. See §13 for the full approval record.
 
 ---
 
@@ -81,8 +82,8 @@ Relevant rules observed:
 - **Rendering:** Server-rendered HTML fragment
 - **Parameters:** `job_id`, `ar` (0=English), `cid` (54=Saudi Arabia), `job_name`
 - **Returns:** 6-10 job items with relative href links to detail pages
-- **robots.txt status:** Disallowed (see §2)
-- **Usability for BFS seed discovery:** Technically functional but not robots.txt-compliant
+- **robots.txt status:** Disallowed (see §2) — **approved exception granted by project mentor on [DATE TBC]; see §13**
+- **Usability for BFS seed discovery:** Functional; approved for academic/capstone use
 
 ### 6.5 `/jobs/with-salaries` Page
 - **Rendering:** Server-rendered
@@ -124,8 +125,8 @@ Relevant rules observed:
     from other sources or hardcode known Saudi employers instead)
 ```
 
-**BFS expansion (use sparingly, one level only):**  
-`similar_jobs.php` is Disallow in robots.txt. For production pipeline, replace with category-based listing pages if discovered, or limit to direct-URL harvesting.
+**BFS expansion via `similar_jobs.php`:**  
+Disallowed in robots.txt but **approved as an exception by the project mentor on [DATE TBC]** for academic/capstone use. The current pipeline uses BFS depth ≤ 2 with 2.0s request delays. See §13 for the approval record.
 
 ---
 
@@ -135,7 +136,7 @@ Relevant rules observed:
 |---|---|
 | `/jobs/search?country=54&page=N` | JS-rendered — page parameter ignored server-side. Returns identical 2 IDs on all pages. |
 | `/jobs/with-salaries?page=N` | Not tested — likely JS-rendered |
-| BFS via similar_jobs | Functional (2.0s delay), but Disallow in robots.txt |
+| BFS via similar_jobs | Functional (2.0s delay); Disallow in robots.txt — **mentor-approved exception ([DATE TBC])** |
 | Company pages | Server-rendered, no pagination needed (typically <25 jobs/company) |
 | Sitemap | `/sitemap-positions-en.xml` has 386 URLs but all `/s/jobs/{keyword}` — redirect to homepage, no direct job IDs |
 
@@ -209,5 +210,18 @@ Relevant rules observed:
 | **Pagination** | No compliant pagination found — JS-rendered search listing. Use seed-based BFS or company-page enumeration |
 | **Data Freshness** | Excellent — postings range 2026-07-17 to 2026-09-09 (up to 54 days old), most within last 2 weeks |
 | **Technical Difficulty** | Low-Medium — detail pages fully server-rendered; challenge is seed discovery without JS-rendered search |
-| **robots.txt / Access** | Detail pages allowed. `similar_jobs.php` and `/jobs/search` disallowed. No auth, no CAPTCHA, no rate-limiting observed at 2s delays |
-| **Recommended for Pipeline** | **Conditional Yes** — rich data, good freshness, no auth barrier, server-rendered detail pages. Primary constraint is robots.txt-compliant bulk seed discovery (JS-rendered search listing is off-limits). Viable if supplemented with company-enumeration or ID-range probing for seed collection. Lower priority than Akhtaboot (which has a compliant listing mechanism). |
+| **robots.txt / Access** | Detail pages allowed. `/jobs/search` disallowed (JS-rendered anyway). `similar_jobs.php` disallowed — **approved exception granted by project mentor on [DATE TBC] for academic use; see §13** |
+| **Recommended for Pipeline** | **Yes — Approved.** Rich data, good freshness, real posting dates, no auth barrier, fully server-rendered detail pages. Use of `similar_jobs.php` for seed discovery has been explicitly approved by the project mentor for this capstone. Pipeline runs at 2.0s delays, BFS depth ≤ 2. |
+
+---
+
+## 13. Approval Record
+
+| Field | Value |
+|---|---|
+| **Open question** | `similar_jobs.php` is listed under `Disallow: /tanqeeb_2020/` in Tanqeeb's robots.txt. The pipeline's BFS seed discovery calls this endpoint. |
+| **Resolution** | Approved for use — project mentor granted explicit permission on **[DATE TBC]** to proceed despite the robots.txt restriction, given the academic/capstone nature of this project. |
+| **Approval method** | [METHOD TBC — e.g., verbal in session / written feedback / email] |
+| **Scope of approval** | Academic capstone use only. Rate-limited (2.0s between requests), bounded volume (≤ 160 job IDs per run), no redistribution of collected data. |
+| **Evidence** | [DATE TBC — insert mentor confirmation reference] |
+| **Remaining constraints** | `/jobs/search` (JS-rendered search listing) remains off-limits and is not used. All detail page scraping and homepage seeds are robots.txt-compliant. |

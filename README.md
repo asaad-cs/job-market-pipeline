@@ -75,6 +75,19 @@ BRONZE.raw_jobs (source)
                                                 └─► GOLD.fct_jobs  (829 curated records)
 ```
 
+### Canonical dataset for submission
+
+`GOLD.fct_jobs` (dbt path) is the **official curated dataset** for this project and the submission source of truth.
+
+`PUBLIC.jobs` is a parallel output produced by the Python pipeline path (`runner.py` → `snowflake_loader.py`). It is more current in row count but is **not the submission source of truth**.
+
+Both tables will be reconciled — BRONZE will be reloaded from SQLite and `dbt run` re-executed — in a single operation once all sources (Careerjet + Tanqeeb) are integrated. Until then, row counts in the two tables intentionally differ:
+
+| Table | Schema | Path | Status |
+|---|---|---|---|
+| `fct_jobs` | `GOLD` | dbt (BRONZE → Silver models → GOLD) | **Canonical — submission source of truth.** Last synced 2026-09-10 (829 rows). |
+| `jobs` | `PUBLIC` | Python (runner.py → snowflake_loader.py) | Parallel output; currently ahead in row count; not the submission source of truth. |
+
 ### Running the dbt models
 
 ```bash

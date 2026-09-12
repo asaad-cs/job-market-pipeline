@@ -17,6 +17,7 @@
 | Akhtaboot | No | **No** — Disallow: / for all bots | **No — public browse** | Title, company, location, career level | **Use as primary sample** |
 | Jadarat (HRDF) | No (open data only) | Not accessible (ECONNREFUSED) | **Yes — Nafath required** | Aggregate stats only | **Exclude / Explore open data** |
 | Taqat | No | **Yes** — fully permissive | **Yes — Nafath-like auth** | None (login wall) | **Exclude** |
+| Tanqeeb | No | **Partial** — detail pages allowed; `similar_jobs.php` disallowed | **No — public browse** | Title, company, city, date, employment type, description, experience, education | **Approved — mentor exception granted [DATE TBC]** |
 
 ---
 
@@ -190,8 +191,8 @@ Fetched and reviewed. The ToS does **not contain explicit anti-scraping language
 - **Not visible on listing pages:** Salary, posting date (visible on detail page, unverified)
 - Language: English primary, Arabic toggle available. MENA-wide coverage including Saudi Arabia.
 
-**Verdict: Use as primary sample — with disclosed limitations.**
-Akhtaboot is the only source investigated where listings are publicly accessible and the ToS does not explicitly prohibit scraping. However, the `User-agent: * Disallow: /` in robots.txt is a clear ethical signal from the operator that automated crawling is not welcome. For academic use, this source is defensible if: (a) collection is rate-limited (≥15-second delays, consistent with the crawl-delay for known bots), (b) volume is small (a sample, not exhaustive), (c) the robots.txt conflict is disclosed transparently in the project write-up, and (d) the data is used solely for research and not redistributed.
+**Verdict: Not used in pipeline — superseded by Tanqeeb (see §9 below).**
+Akhtaboot is the only source investigated here where listings are publicly accessible and the ToS does not explicitly prohibit scraping. However, the `User-agent: * Disallow: /` in robots.txt is a clear ethical signal from the operator that automated crawling is not welcome. The project ultimately selected Tanqeeb as the secondary source instead of Akhtaboot — Tanqeeb has richer structured fields (posting date, employment type, experience, education) and its robots.txt restriction is narrower (only the `similar_jobs.php` BFS endpoint, not the entire site). The Akhtaboot robots.txt conflict would have required the same disclosure as Tanqeeb but with less structured data in return.
 
 ---
 
@@ -242,20 +243,47 @@ The permissive robots.txt is misleading — there is no public content to crawl.
 
 ---
 
+### 9. Tanqeeb (saudi.tanqeeb.com)
+
+*Investigated separately on 2026-09-09. Full analysis in `docs/tanqeeb_source_analysis.md`.*
+
+**robots.txt:** Allows detail pages (`/jobs-in-saudi/all/jobs/`). Disallows `/tanqeeb_2020/` (covering `similar_jobs.php`). Does not disallow the homepage or `/jobs/with-salaries`.
+
+**Terms of Service:** No explicit prohibition on automated access. Standard employer-conduct ToS only.
+
+**API:** None.
+
+**Access barriers:** None. Full job content accessible without authentication.
+
+**Data structure:** Title, company (89%), city (79.5%), country, posting_date (100%), employment_type (87%), job_description (89%), experience, education, category. 117 records collected in initial scrape.
+
+**Open question → Resolution:**
+
+| | |
+|---|---|
+| **OQ** | `similar_jobs.php` used for BFS seed discovery is Disallow in robots.txt. Detail-page scraping and homepage seeds are compliant. |
+| **Resolution** | Approved for use — project mentor granted explicit exception on **[DATE TBC]** for academic/capstone purposes. |
+| **Evidence** | [METHOD TBC — e.g., verbal approval in session / written feedback]. Full record in `docs/tanqeeb_source_analysis.md §13`. |
+
+**Verdict: Approved — active secondary source in pipeline.**
+Selected over Akhtaboot for richer structured fields (real posting dates, employment type, structured experience/education) and a narrower robots.txt restriction. Runs at 2.0s delays, BFS depth ≤ 2, bounded to ≤ 160 job IDs per run.
+
+---
+
 ## Final Recommendation
 
 The Saudi Arabia job board landscape is, in general, **highly restrictive** toward automated data collection. Six of eight sources are effectively closed to a legitimate academic pipeline. The honest recommendation is:
 
-### Build the pipeline against these 2–3 sources, in this order:
+### Sources selected for the pipeline (actual outcome):
 
-**1. Akhtaboot (primary scraping source)**
-The only platform with publicly accessible listings and no explicit ToS prohibition on scraping. Use with full ethical disclosure: the `robots.txt` disallows all general crawlers, which must be stated in the project. Implement conservative rate-limiting (≥15-second delay between requests). Collect a bounded sample (200–500 listings across Saudi Arabia cities). Akhtaboot covers the MENA region including Saudi Arabia, serves both Arabic and English, and has a parseable URL structure (`/en/saudi-arabia/jobs/`). Appropriate for demonstrating pipeline mechanics — ingestion, parsing, schema normalization, storage.
+**1. Careerjet Partner API (primary source — official API)**
+Registered partner programme; no scraping required. Saudi Arabia locale (`en_SA`). Returns up to 17,000+ live listings. Selected as primary source for its clean legal status, reliable field structure, and unlimited repeat collection. Full pipeline implemented against this source.
 
-**2. HRDF Open Data / National Open Data Platform (cleanest legal path)**
-Rather than scraping government platforms that require Nafath, pursue the official open data route: investigate `open.data.gov.sa` directly (not reachable during this investigation — worth attempting from within Saudi Arabia or a Saudi-network VPN) and HRDF's open data library at `hrdf.org.sa`. HRDF states its data is published "free and without restrictions." If downloadable labor market datasets exist (even as CSV dumps of aggregate data), this gives the project its most legally defensible and academically credible data source, directly tied to the official national employment platform.
+**2. Tanqeeb (secondary scraping source — mentor-approved)**
+Investigated post-report (2026-09-09). Selected over Akhtaboot for richer structured fields (real posting dates, employment type, education, experience) and a narrower robots.txt restriction. Use of `similar_jobs.php` for seed discovery approved by project mentor on [DATE TBC]. 117 records collected in initial scrape. See `docs/tanqeeb_source_analysis.md` for full analysis and §13 for the approval record.
 
-**3. Mihnati (manual seed dataset)**
-If the researcher creates an account on Mihnati.com, a small manually-collected sample (50–100 listings, logged-in browsing, manual export or session-authenticated requests) would add Saudi-specific market data unavailable elsewhere. This is not scalable but provides valuable "ground truth" for data with a Saudi nationality / Saudization dimension that Akhtaboot (MENA-wide) may underrepresent.
+**Original recommendation (Akhtaboot) — not used:**
+Akhtaboot was the original primary scraping recommendation from this report. It was superseded by Tanqeeb, which provides more structured data with an equally narrow robots.txt issue. Both require the same ethical disclosure; Tanqeeb was the better data trade-off.
 
 ### Sources to exclude and why (for the presentation):
 - **Bayt.com**: robots.txt + server-level 403 blocks = technical blocker
