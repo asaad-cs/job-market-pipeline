@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: fct_jobs
+    description: >
+      Final curated job postings table. Non-duplicate, non-rejected records only.
+      Populated from all integrated sources via the Silver transformation chain.
+    columns:
+      - name: job_id
+        description: UUID assigned at dbt processing time — surrogate primary key.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: title
+        description: Cleaned job title (Saudi-national qualifiers stripped).
+        data_tests:
+          - not_null
+
+      - name: source_name
+        description: Name of the data source this record came from.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['careerjet', 'tanqeeb']
+
+      - name: collected_at
+        description: ISO-8601 timestamp when the raw record was collected.
+        data_tests:
+          - not_null
+
+      - name: source_url
+        description: URL of the original job posting.
+
+      - name: job_fingerprint
+        description: >
+          SHA-256 fingerprint used as dedup key. 3-component for sources without
+          a reliable posting_date (Careerjet); 4-component for sources with one.
