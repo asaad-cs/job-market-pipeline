@@ -2,6 +2,7 @@
 
 with source as (
     select * from {{ source('raw', 'raw_jobs') }}
+    where source_name = 'careerjet'
 )
 
 select
@@ -16,5 +17,6 @@ select
     nullif(raw_payload:locations::string,   '') as location_raw,
     nullif(raw_payload:description::string, '') as description,
     nullif(raw_payload:salary::string,      '') as salary_raw,
-    raw_payload:date::string                    as api_date_raw
+    raw_payload:date::string                    as api_date_raw,
+    cast(null as varchar)                       as posting_date_raw  -- Careerjet date field is query timestamp, not listing date
 from source

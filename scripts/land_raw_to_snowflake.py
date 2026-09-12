@@ -1,17 +1,19 @@
 """
-Phase A — Land existing SQLite raw data into Snowflake BRONZE layer.
+Land three-source sample into Snowflake BRONZE.
 
-Reads from data/pipeline.db (no API calls) and creates:
-  JOB_PIPELINE_DB.BRONZE.collection_runs   (4 rows)
-  JOB_PIPELINE_DB.BRONZE.raw_jobs          (1,109 rows)
+Sources loaded:
+  Careerjet : 99 records from SQLite run dfa8e653 (2026-09-06, single 1-page pull)
+  Tanqeeb   : 117 records from data/raw/tanqeeb_jobs.json
+  Jooble    : 109 records from data/raw/jooble_combined_2026-09-12.json
 
-raw_payload is stored as VARIANT (PARSE_JSON applied on insert) so that
-downstream dbt staging models can use Snowflake path syntax directly.
+Idempotency: TRUNCATEs BRONZE.raw_jobs and BRONZE.collection_runs before
+loading. Safe to re-run — always produces a clean state.
 
-Idempotency: aborts if BRONZE.raw_jobs already contains rows. To re-run from
-scratch, TRUNCATE both tables first.
+No hardcoded count assertions. Actual counts are reported at the end.
 """
-import io, os, sqlite3, sys
+import io, json, os, sqlite3, sys, uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 sys.path.insert(0, ".")
 if hasattr(sys.stdout, "buffer"):
@@ -22,9 +24,14 @@ load_dotenv()
 
 import snowflake.connector
 
-SQLITE_PATH = "./data/pipeline.db"
+# ── Paths ─────────────────────────────────────────────────────────────────────
+SQLITE_PATH   = "./data/pipeline.db"
+TANQEEB_JSON  = "./data/raw/tanqeeb_jobs.json"
+JOOBLE_JSON   = "./data/raw/jooble_combined_2026-09-12.json"
+CAREERJET_RUN = "dfa8e653"   # prefix of the target run_id in SQLite
 
-_CREATE_RAW_SCHEMA = "CREATE SCHEMA IF NOT EXISTS BRONZE"
+# ── DDL ───────────────────────────────────────────────────────────────────────
+_CREATE_SCHEMA = "CREATE SCHEMA IF NOT EXISTS BRONZE"
 
 _CREATE_COLLECTION_RUNS = """
 CREATE TABLE IF NOT EXISTS BRONZE.collection_runs (
@@ -49,7 +56,7 @@ CREATE TABLE IF NOT EXISTS BRONZE.raw_jobs (
 )
 """
 
-_INSERT_COLLECTION_RUN = """
+_INSERT_RUN = """
 INSERT INTO BRONZE.collection_runs
     (run_id, started_at, completed_at, source_name, records_fetched, notes)
 VALUES (%s, %s, %s, %s, %s, %s)
@@ -62,11 +69,100 @@ SELECT %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
 """
 
 
-def _get_snowflake_conn():
-    required = [
-        "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD",
-        "SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_DATABASE", "SNOWFLAKE_SCHEMA",
-    ]
+# ── Source loaders ────────────────────────────────────────────────────────────
+
+def _load_careerjet():
+    """Read run dfa8e653 from SQLite. Returns (run_row, job_rows)."""
+    conn = sqlite3.connect(SQLITE_PATH)
+    run = conn.execute(
+        "SELECT run_id, started_at, completed_at, source_name, records_fetched, notes "
+        "FROM collection_runs WHERE run_id LIKE ?",
+        (CAREERJET_RUN + "%",)
+    ).fetchone()
+    if not run:
+        conn.close()
+        sys.exit(f"ERROR: no collection_run found with prefix {CAREERJET_RUN!r}")
+
+    jobs = conn.execute(
+        "SELECT raw_id, run_id, source_name, source_job_id, source_url, raw_payload, collected_at "
+        "FROM raw_jobs WHERE run_id = ?",
+        (run[0],)
+    ).fetchall()
+    conn.close()
+
+    print(f"  Careerjet (SQLite) : run {run[0][:8]}  {len(jobs)} records  {str(run[1])[:19]}")
+    return run, jobs
+
+
+def _load_tanqeeb():
+    """Read tanqeeb_jobs.json. Returns (run_row, job_rows)."""
+    with open(TANQEEB_JSON, encoding="utf-8") as f:
+        records = json.load(f)
+
+    run_id = str(uuid.uuid4())
+    timestamps = [r["scraped_at"] for r in records if r.get("scraped_at")]
+    started_at   = min(timestamps) if timestamps else datetime.now(timezone.utc).isoformat()
+    completed_at = max(timestamps) if timestamps else started_at
+
+    run_row = (
+        run_id, started_at, completed_at, "tanqeeb", len(records),
+        "Initial scrape via scripts/scrape_tanqeeb.py (2026-09-09)"
+    )
+
+    job_rows = []
+    for rec in records:
+        job_rows.append((
+            str(uuid.uuid4()),
+            run_id,
+            "tanqeeb",
+            str(rec.get("source_job_id", "") or ""),
+            rec.get("job_url", ""),
+            json.dumps(rec, ensure_ascii=False),
+            rec.get("scraped_at", started_at),
+        ))
+
+    print(f"  Tanqeeb (JSON)     : run {run_id[:8]}  {len(job_rows)} records  {started_at[:19]}")
+    return run_row, job_rows
+
+
+def _load_jooble():
+    """Read jooble_combined JSON. Returns (run_row, job_rows)."""
+    with open(JOOBLE_JSON, encoding="utf-8") as f:
+        records = json.load(f)
+
+    run_id = str(uuid.uuid4())
+    # Use the updated field from the records as a proxy for collection timestamp
+    timestamps = [r["updated"] for r in records if r.get("updated")]
+    started_at   = "2026-09-09T00:00:00+00:00"   # earliest API call date
+    completed_at = "2026-09-12T00:00:00+00:00"   # step-B call date
+
+    run_row = (
+        run_id, started_at, completed_at, "jooble", len(records),
+        "Combined from 9 API calls (Sep-09 5-call pull + Sep-12 step-B 4-call pull); "
+        "500-call lifetime quota; 1 duplicate removed"
+    )
+
+    job_rows = []
+    for rec in records:
+        job_rows.append((
+            str(uuid.uuid4()),
+            run_id,
+            "jooble",
+            str(rec.get("id", "") or ""),
+            rec.get("link", ""),
+            json.dumps(rec, ensure_ascii=False),
+            rec.get("updated", started_at),
+        ))
+
+    print(f"  Jooble (JSON)      : run {run_id[:8]}  {len(job_rows)} records  {started_at[:19]}")
+    return run_row, job_rows
+
+
+# ── Snowflake connection ──────────────────────────────────────────────────────
+
+def _get_sf():
+    required = ["SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD",
+                "SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_DATABASE", "SNOWFLAKE_SCHEMA"]
     missing = [k for k in required if not os.getenv(k)]
     if missing:
         sys.exit(f"ERROR: Missing Snowflake env vars: {missing}")
@@ -80,125 +176,101 @@ def _get_snowflake_conn():
     )
 
 
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main():
-    # ── Step 1: Read from SQLite ──────────────────────────────────────────────
-    print("Reading from SQLite...")
-    sqlite_conn = sqlite3.connect(SQLITE_PATH)
+    # 1. Build in-memory record sets from all three sources
+    print("Reading source data...")
+    cj_run, cj_jobs = _load_careerjet()
+    tq_run, tq_jobs = _load_tanqeeb()
+    jb_run, jb_jobs = _load_jooble()
 
-    runs = sqlite_conn.execute(
-        "SELECT run_id, started_at, completed_at, source_name, records_fetched, notes "
-        "FROM collection_runs ORDER BY started_at"
-    ).fetchall()
+    total_jobs = len(cj_jobs) + len(tq_jobs) + len(jb_jobs)
+    print(f"  Total records to load : {total_jobs}")
+    print()
 
-    raw_jobs = sqlite_conn.execute(
-        "SELECT raw_id, run_id, source_name, source_job_id, source_url, raw_payload, collected_at "
-        "FROM raw_jobs"
-    ).fetchall()
-    sqlite_conn.close()
-
-    print(f"  collection_runs : {len(runs)} rows")
-    print(f"  raw_jobs        : {len(raw_jobs)} rows")
-
-    if len(runs) != 4 or len(raw_jobs) != 1109:
-        print(f"WARNING: unexpected source counts (expected 4 runs, 1109 raw_jobs)")
-
-    # ── Step 2: Connect to Snowflake ──────────────────────────────────────────
-    print("\nConnecting to Snowflake...")
-    sf = _get_snowflake_conn()
+    # 2. Connect to Snowflake
+    print("Connecting to Snowflake...")
+    sf = _get_sf()
     cur = sf.cursor()
 
-    # ── Step 3: Create RAW schema and tables ──────────────────────────────────
-    print("Creating BRONZE schema and tables if not exist...")
-    cur.execute(_CREATE_RAW_SCHEMA)
+    # 3. Create schema and tables if not exist
+    print("Ensuring BRONZE schema and tables exist...")
+    cur.execute(_CREATE_SCHEMA)
     cur.execute(_CREATE_COLLECTION_RUNS)
     cur.execute(_CREATE_RAW_JOBS)
 
-    # ── Step 4: Idempotency guard ─────────────────────────────────────────────
-    cur.execute("SELECT COUNT(*) FROM BRONZE.raw_jobs")
-    existing = cur.fetchone()[0]
-    if existing > 0:
-        print(f"\nABORT: BRONZE.raw_jobs already contains {existing} rows.")
-        print("To re-run: TRUNCATE TABLE BRONZE.raw_jobs; TRUNCATE TABLE BRONZE.collection_runs;")
-        cur.close()
-        sf.close()
-        sys.exit(1)
-
-    # ── Step 5: Load collection_runs ──────────────────────────────────────────
-    print(f"\nLoading {len(runs)} collection_runs rows...")
-    for row in runs:
-        cur.execute(_INSERT_COLLECTION_RUN, row)
+    # 4. TRUNCATE — clean slate for the demo load
+    print("Truncating BRONZE tables...")
+    cur.execute("TRUNCATE TABLE BRONZE.collection_runs")
+    cur.execute("TRUNCATE TABLE BRONZE.raw_jobs")
     sf.commit()
     print("  Done.")
+    print()
 
-    # ── Step 6: Load raw_jobs ─────────────────────────────────────────────────
-    print(f"\nLoading {len(raw_jobs)} raw_jobs rows (PARSE_JSON on each — ~60-90s)...")
-    inserted = 0
-    failed: list[tuple[str, str]] = []
-
-    for i, row in enumerate(raw_jobs):
-        raw_id, run_id, source_name, source_job_id, source_url, raw_payload, collected_at = row
-        try:
-            cur.execute(
-                _INSERT_RAW_JOB,
-                (raw_id, run_id, source_name, source_job_id, source_url, raw_payload, collected_at),
-            )
-            inserted += 1
-        except Exception as e:
-            failed.append((raw_id, str(e)))
-
-        if (i + 1) % 100 == 0 or (i + 1) == len(raw_jobs):
-            print(f"  {i + 1:>4}/{len(raw_jobs)} rows ...")
-
+    # 5. Load collection_runs (3 rows)
+    print("Loading 3 collection_runs rows...")
+    for run_row in [cj_run, tq_run, jb_run]:
+        cur.execute(_INSERT_RUN, run_row)
     sf.commit()
+    print("  Done.")
+    print()
 
-    # ── Step 7: Verify ────────────────────────────────────────────────────────
-    cur.execute("SELECT COUNT(*) FROM BRONZE.collection_runs")
-    sf_run_count = cur.fetchone()[0]
+    # 6. Load raw_jobs — all three sources
+    def _insert_batch(label, job_rows):
+        inserted = 0
+        failed = []
+        for i, row in enumerate(job_rows):
+            try:
+                cur.execute(_INSERT_RAW_JOB, row)
+                inserted += 1
+            except Exception as exc:
+                failed.append((row[0], str(exc)))
+            if (i + 1) % 50 == 0 or (i + 1) == len(job_rows):
+                print(f"  {label}: {i+1}/{len(job_rows)} rows...")
+        sf.commit()
+        if failed:
+            print(f"  FAILED ({len(failed)}):")
+            for raw_id, err in failed[:5]:
+                print(f"    {raw_id[:8]}: {err[:80]}")
+        return inserted, len(failed)
+
+    print(f"Loading Careerjet ({len(cj_jobs)} rows)...")
+    cj_ok, cj_fail = _insert_batch("careerjet", cj_jobs)
+
+    print(f"Loading Tanqeeb ({len(tq_jobs)} rows)...")
+    tq_ok, tq_fail = _insert_batch("tanqeeb", tq_jobs)
+
+    print(f"Loading Jooble ({len(jb_jobs)} rows)...")
+    jb_ok, jb_fail = _insert_batch("jooble", jb_jobs)
+
+    print()
+
+    # 7. Verify — counts by source
+    cur.execute("SELECT source_name, COUNT(*) FROM BRONZE.raw_jobs GROUP BY source_name ORDER BY source_name")
+    by_source = cur.fetchall()
 
     cur.execute("SELECT COUNT(*) FROM BRONZE.raw_jobs")
-    sf_raw_count = cur.fetchone()[0]
+    total_sf = cur.fetchone()[0]
 
-    cur.execute(
-        "SELECT run_id, source_name, records_fetched, started_at "
-        "FROM BRONZE.collection_runs ORDER BY started_at"
-    )
-    sf_runs = cur.fetchall()
-
-    cur.execute(
-        "SELECT run_id, COUNT(*) AS cnt FROM BRONZE.raw_jobs "
-        "GROUP BY run_id ORDER BY MIN(collected_at)"
-    )
-    sf_per_run = cur.fetchall()
+    cur.execute("SELECT COUNT(*) FROM BRONZE.collection_runs")
+    runs_sf = cur.fetchone()[0]
 
     cur.close()
     sf.close()
 
-    # ── Step 8: Report ────────────────────────────────────────────────────────
-    print(f"\n{'=' * 55}")
-    print("PHASE A — LANDING COMPLETE")
-    print(f"{'=' * 55}")
-    print(f"  BRONZE.collection_runs : {sf_run_count} rows")
-    print(f"  BRONZE.raw_jobs        : {sf_raw_count} rows")
-    if failed:
-        print(f"  FAILED              : {len(failed)} rows")
-        for raw_id, err in failed:
-            print(f"    {raw_id[:8]}: {err[:80]}")
+    # 8. Report
+    print("=" * 55)
+    print("BRONZE LOAD COMPLETE")
+    print("=" * 55)
+    print(f"  collection_runs : {runs_sf} rows")
+    print(f"  raw_jobs total  : {total_sf} rows")
     print()
-    print("  collection_runs breakdown:")
-    for run_id, source, count, started in sf_runs:
-        print(f"    {str(run_id)[:8]}  {source}  {count} records  {str(started)[:19]}")
-    print()
-    print("  raw_jobs per run:")
-    for run_id, cnt in sf_per_run:
-        print(f"    {str(run_id)[:8]}  {cnt} records")
-    print()
-
-    passed = sf_run_count == 4 and sf_raw_count == 1109 and not failed
-    if passed:
-        print("PASS — all 1,109 raw_jobs and 4 collection_runs landed. Ready for Phase B.")
-    else:
-        print(f"FAIL — expected 4 runs and 1,109 raw_jobs. Review output above.")
-    print(f"{'=' * 55}")
+    print("  raw_jobs by source_name:")
+    for source, count in by_source:
+        status = "OK" if (cj_fail if source == "careerjet" else tq_fail if source == "tanqeeb" else jb_fail) == 0 else "PARTIAL"
+        print(f"    {source:<12}: {count:>4} rows  [{status}]")
+    print("=" * 55)
 
 
 if __name__ == "__main__":

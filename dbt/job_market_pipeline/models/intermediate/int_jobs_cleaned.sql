@@ -1,14 +1,26 @@
 {{ config(materialized='view') }}
 
 -- Replicates pipeline/processing/cleaner.py logic in SQL.
+-- Applied uniformly to all three sources (Careerjet, Tanqeeb, Jooble) via UNION ALL.
 --
 -- Known divergence (display only, does not affect fingerprints):
 --   Python re-uppercases 3-5 char all-caps tokens after title-casing company names
 --   (e.g., "AECOM" stays "AECOM"). SQL uses INITCAP which lowercases them ("Aecom").
 --   Fingerprints are unaffected because SHA2 input always uses UPPER() on cleaned values.
 
-with stg as (
+with all_sources as (
+    -- All three staging models share the same 13-column canonical shape.
+    -- The UNION ALL here is the single merge point: one cleaning/standardization/
+    -- dedup/quality pipeline runs against all sources together.
     select * from {{ ref('stg_careerjet__raw_jobs') }}
+    union all
+    select * from {{ ref('stg_tanqeeb__raw_jobs') }}
+    union all
+    select * from {{ ref('stg_jooble__raw_jobs') }}
+),
+
+stg as (
+    select * from all_sources
 ),
 
 -- ── Step 1: Clean title & detect Saudi-national flag ──────────────────────
@@ -174,7 +186,7 @@ select
     location_country,
     location_raw,
     description,
-    cast(null as date)                                  as posting_date,  -- Careerjet `date` is query timestamp, not listing date
+    try_to_date(posting_date_raw)                       as posting_date,  -- NULL for Careerjet; real date for Tanqeeb + Jooble
     api_date_raw,
     salary_raw,
     saudi_national_only,
