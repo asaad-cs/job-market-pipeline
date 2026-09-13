@@ -23,7 +23,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ['careerjet', 'tanqeeb', 'jooble']
+                values: ['careerjet', 'tanqeeb', 'jooble', 'techmap']
 
       - name: collected_at
         description: ISO-8601 timestamp when the raw record was collected.

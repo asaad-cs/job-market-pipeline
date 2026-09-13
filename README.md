@@ -59,20 +59,23 @@ The pipeline includes a dbt project (`dbt/job_market_pipeline/`) that replicates
 
 | Layer | Schema | dbt models | Contents |
 |---|---|---|---|
-| **Bronze** | `BRONZE` | *(source, not a dbt model)* | Raw VARIANT payloads from Careerjet API — `raw_jobs` and `collection_runs` tables loaded by `scripts/land_raw_to_snowflake.py` |
-| **Silver** | `SILVER` | `stg_careerjet__raw_jobs`, `int_jobs_cleaned`, `int_jobs_standardized`, `int_jobs_deduplicated`, `int_jobs_quality_flags` | Field extraction, cleaning, standardization, dedup, quality flagging — all as views |
+| **Bronze** | `BRONZE` | *(source, not a dbt model)* | Raw VARIANT payloads from all four sources — `raw_jobs` and `collection_runs` tables loaded by `scripts/land_raw_to_snowflake.py` |
+| **Silver** | `SILVER` | `stg_careerjet__raw_jobs`, `stg_tanqeeb__raw_jobs`, `stg_jooble__raw_jobs`, `stg_techmap__raw_jobs`, `int_jobs_cleaned`, `int_jobs_standardized`, `int_jobs_deduplicated`, `int_jobs_quality_flags` | Field extraction, cleaning, standardization, dedup, quality flagging — all as views |
 | **Gold** | `GOLD` | `fct_jobs` | Non-duplicate, non-rejected curated records — materialized as a table |
 
 ### Model chain
 
 ```
 BRONZE.raw_jobs (source)
-    └─► SILVER.stg_careerjet__raw_jobs   (field extraction from VARIANT)
-            └─► SILVER.int_jobs_cleaned          (title/company/location/fingerprint)
-                    └─► SILVER.int_jobs_standardized   (career level, salary, out_of_region)
-                            └─► SILVER.int_jobs_deduplicated  (is_duplicate, duplicate_of_raw_id)
-                                    └─► SILVER.int_jobs_quality_flags (quality_flags, is_rejected)
-                                                └─► GOLD.fct_jobs  (829 curated records)
+    ├─► SILVER.stg_careerjet__raw_jobs  ─┐
+    ├─► SILVER.stg_tanqeeb__raw_jobs    ─┤ UNION ALL
+    ├─► SILVER.stg_jooble__raw_jobs     ─┤ (canonical 13-column shape)
+    └─► SILVER.stg_techmap__raw_jobs    ─┘
+                └─► SILVER.int_jobs_cleaned          (title/company/location/fingerprint)
+                        └─► SILVER.int_jobs_standardized   (career level, salary, out_of_region)
+                                └─► SILVER.int_jobs_deduplicated  (is_duplicate, duplicate_of_raw_id)
+                                        └─► SILVER.int_jobs_quality_flags (quality_flags, is_rejected)
+                                                    └─► GOLD.fct_jobs  (327 curated records)
 ```
 
 ### Canonical dataset for submission
@@ -353,19 +356,48 @@ skills extraction or detailed NLP without fetching the detail page.
 
 ### 6. Cross-source deduplication is designed but not empirically validated
 
-Cross-source deduplication logic exists — jobs from all three sources are matched
+Cross-source deduplication logic exists — jobs from all four sources are matched
 via a shared SHA-256 fingerprint schema (`SHA-256(title | company_name | location_city)`)
 in `SILVER.int_jobs_deduplicated`. A job posted on both Tanqeeb and Jooble, for example,
 would receive the same fingerprint and be deduplicated correctly.
 
-However, this has not yet been empirically validated. In the current 325-record sample
-(~100 records per source), zero jobs appeared simultaneously across multiple sources, so
-no cross-source duplicate was actually caught and verified. All 8 deduplicated records
-were within-source collisions (repeated postings within the same source's own collection).
+However, this has not yet been empirically validated. In the current 335-record sample
+(~100 per source for Careerjet/Tanqeeb/Jooble, 10 for Techmap), zero jobs appeared
+simultaneously across multiple sources, so no cross-source duplicate was actually caught
+and verified. All deduplicated records were within-source collisions.
 
 This is expected at this sample size — genuine cross-source overlap is rare in a
 ~100-record slice of each source's much larger corpus. The mechanism should be revisited
 and validated with a larger, intentionally overlapping dataset if the project scales.
+
+### 7. Techmap source is a static 10-record sample, not a live integration
+
+Techmap is included as a fourth source based on a single 10-record static sample
+collected via RapidAPI by a teammate on 2026-09-07, not a live API integration.
+No `TECHMAP_API_KEY` exists in `.env`; converting to live collection requires
+implementing the actual RapidAPI call and confirming rate limits and Terms of Service
+(see `pipeline/collectors/techmap.py` docstring for the exact steps needed).
+
+The static sample is committed at `data/raw/techmap_sample.json`. Re-running
+`scripts/land_raw_to_snowflake.py` will always reload these same 10 records.
+
+### 8. Techmap Terms of Service not fully verified
+
+Techmap's Terms of Service for automated/scheduled collection could not be fully
+verified — `jobdatafeeds.com` defers actual API terms to a RapidAPI subscription
+agreement that was not reviewed in depth for this project. This source should be
+re-verified before any production scaling or scheduled collection is implemented.
+
+### 9. Techmap posting_date reliability not empirically validated
+
+`posting_date` for Techmap records is based on the source platform's `dateCreated`
+field. Timestamp variation across a 4.5-hour window (02:20–06:48 UTC) and the
+`dateActive = dateCreated + platform-standard-duration` formula observed in the
+data both suggest these are genuine posting times from the originating platform
+(LinkedIn or ATS), not a collection-time artifact like Careerjet's `date` field.
+However, this interpretation has not been empirically validated with a multi-day
+sample (all 10 records are from a single pull on 2026-09-07 and cannot confirm
+whether `dateCreated` updates on re-sync).
 
 ---
 

@@ -1,7 +1,7 @@
 {{ config(materialized='view') }}
 
 -- Replicates pipeline/processing/cleaner.py logic in SQL.
--- Applied uniformly to all three sources (Careerjet, Tanqeeb, Jooble) via UNION ALL.
+-- Applied uniformly to all four sources (Careerjet, Tanqeeb, Jooble, Techmap) via UNION ALL.
 --
 -- Known divergence (display only, does not affect fingerprints):
 --   Python re-uppercases 3-5 char all-caps tokens after title-casing company names
@@ -9,7 +9,7 @@
 --   Fingerprints are unaffected because SHA2 input always uses UPPER() on cleaned values.
 
 with all_sources as (
-    -- All three staging models share the same 13-column canonical shape.
+    -- All four staging models share the same 13-column canonical shape.
     -- The UNION ALL here is the single merge point: one cleaning/standardization/
     -- dedup/quality pipeline runs against all sources together.
     select * from {{ ref('stg_careerjet__raw_jobs') }}
@@ -17,6 +17,8 @@ with all_sources as (
     select * from {{ ref('stg_tanqeeb__raw_jobs') }}
     union all
     select * from {{ ref('stg_jooble__raw_jobs') }}
+    union all
+    select * from {{ ref('stg_techmap__raw_jobs') }}
 ),
 
 stg as (

@@ -4,11 +4,11 @@ sources:
   - name: raw
     description: >
       Multi-source raw data landed into Snowflake BRONZE by
-      scripts/land_raw_to_snowflake.py. Three sources: Careerjet (API),
-      Tanqeeb (scraper), Jooble (API). No transformations applied —
-      raw_payload is stored as VARIANT for direct path-syntax access.
-      Each source's staging model filters by source_name and extracts
-      its own field paths from raw_payload.
+      scripts/land_raw_to_snowflake.py. Four sources: Careerjet (API),
+      Tanqeeb (scraper), Jooble (API), Techmap (static sample via RapidAPI).
+      No transformations applied — raw_payload is stored as VARIANT for
+      direct path-syntax access. Each source's staging model filters by
+      source_name and extracts its own field paths from raw_payload.
     database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
     schema: BRONZE
     tables:
@@ -19,13 +19,14 @@ sources:
             careerjet — keys: title, company, locations, description, salary, url, date, site
             tanqeeb   — keys: job_title, company, city, country, job_description, salary, posting_date, scraped_at
             jooble    — keys: title, company, location, snippet, salary, updated, id, link, source
+            techmap   — keys: title, company, city, country, date_created, occupation, industry, work_place, work_type, career_level, portal, has_salary, is_duplicate
         columns:
           - name: raw_id
             description: UUID assigned at collection time — primary key.
           - name: run_id
             description: FK to collection_runs.run_id.
           - name: source_name
-            description: Data source name — one of careerjet, tanqeeb, jooble.
+            description: Data source name — one of careerjet, tanqeeb, jooble, techmap.
           - name: source_job_id
             description: Native job ID from source. NULL for Careerjet (no native ID); populated for Tanqeeb and Jooble.
           - name: source_url

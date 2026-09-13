@@ -112,6 +112,7 @@ def run(source: str = "careerjet") -> None:
     from pipeline.collectors.careerjet import collect as collect_careerjet
     from pipeline.collectors.jadarat_csv import collect as collect_jadarat
     from pipeline.collectors.tanqeeb import collect as collect_tanqeeb
+    from pipeline.collectors.techmap import collect as collect_techmap
 
     if source == "careerjet":
         raw_records = collect_careerjet(run_id=run_id)
@@ -119,6 +120,8 @@ def run(source: str = "careerjet") -> None:
         raw_records = collect_jadarat(run_id=run_id)
     elif source == "tanqeeb":
         raw_records = collect_tanqeeb(run_id=run_id)
+    elif source == "techmap":
+        raw_records = collect_techmap(run_id=run_id)
     else:
         raise ValueError(f"Unknown source: {source!r}")
 
@@ -169,7 +172,7 @@ def run(source: str = "careerjet") -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Job Market Data Pipeline")
     parser.add_argument("--source", default="careerjet",
-                        choices=["careerjet", "jadarat", "tanqeeb"],
+                        choices=["careerjet", "jadarat", "tanqeeb", "techmap"],
                         help="Data source to collect from")
     args = parser.parse_args()
     run(source=args.source)

@@ -1,10 +1,12 @@
 """
-Land three-source sample into Snowflake BRONZE.
+Land four-source sample into Snowflake BRONZE.
 
 Sources loaded:
   Careerjet : 99 records from SQLite run dfa8e653 (2026-09-06, single 1-page pull)
   Tanqeeb   : 117 records from data/raw/tanqeeb_jobs.json
   Jooble    : 109 records from data/raw/jooble_combined_2026-09-12.json
+  Techmap   : 10 records from data/raw/techmap_sample.json (static sample,
+              teammate RapidAPI pull 2026-09-07; no live key; ToS unverified)
 
 Idempotency: TRUNCATEs BRONZE.raw_jobs and BRONZE.collection_runs before
 loading. Safe to re-run — always produces a clean state.
@@ -125,6 +127,40 @@ def _load_tanqeeb():
     return run_row, job_rows
 
 
+def _load_techmap():
+    """Read techmap_sample.json via the collector. Returns (run_row, job_rows)."""
+    import sys as _sys
+    _sys.path.insert(0, ".")
+    from pipeline.collectors.techmap import collect
+
+    run_id = str(uuid.uuid4())
+    # Teammate collected this sample on 2026-09-07; use that as the run timestamp
+    collection_date = "2026-09-07T00:00:00+00:00"
+
+    raw = collect(run_id=run_id)
+
+    run_row = (
+        run_id, collection_date, collection_date, "techmap", len(raw),
+        "Static 10-record sample collected by teammate via RapidAPI Techmap endpoint "
+        "(2026-09-07). No live API key configured. ToS not fully verified."
+    )
+
+    job_rows = []
+    for rec in raw:
+        job_rows.append((
+            rec["raw_id"],
+            rec["run_id"],
+            rec["source_name"],
+            rec["source_job_id"],
+            rec["source_url"] or "",
+            rec["raw_payload"],
+            collection_date,    # use teammate collection date, not today's load time
+        ))
+
+    print(f"  Techmap (JSON)     : run {run_id[:8]}  {len(job_rows)} records  {collection_date[:19]}")
+    return run_row, job_rows
+
+
 def _load_jooble():
     """Read jooble_combined JSON. Returns (run_row, job_rows)."""
     with open(JOOBLE_JSON, encoding="utf-8") as f:
@@ -179,13 +215,14 @@ def _get_sf():
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    # 1. Build in-memory record sets from all three sources
+    # 1. Build in-memory record sets from all four sources
     print("Reading source data...")
     cj_run, cj_jobs = _load_careerjet()
     tq_run, tq_jobs = _load_tanqeeb()
     jb_run, jb_jobs = _load_jooble()
+    tm_run, tm_jobs = _load_techmap()
 
-    total_jobs = len(cj_jobs) + len(tq_jobs) + len(jb_jobs)
+    total_jobs = len(cj_jobs) + len(tq_jobs) + len(jb_jobs) + len(tm_jobs)
     print(f"  Total records to load : {total_jobs}")
     print()
 
@@ -208,15 +245,15 @@ def main():
     print("  Done.")
     print()
 
-    # 5. Load collection_runs (3 rows)
-    print("Loading 3 collection_runs rows...")
-    for run_row in [cj_run, tq_run, jb_run]:
+    # 5. Load collection_runs (4 rows)
+    print("Loading 4 collection_runs rows...")
+    for run_row in [cj_run, tq_run, jb_run, tm_run]:
         cur.execute(_INSERT_RUN, run_row)
     sf.commit()
     print("  Done.")
     print()
 
-    # 6. Load raw_jobs — all three sources
+    # 6. Load raw_jobs — all four sources
     def _insert_batch(label, job_rows):
         inserted = 0
         failed = []
@@ -244,6 +281,9 @@ def main():
     print(f"Loading Jooble ({len(jb_jobs)} rows)...")
     jb_ok, jb_fail = _insert_batch("jooble", jb_jobs)
 
+    print(f"Loading Techmap ({len(tm_jobs)} rows)...")
+    tm_ok, tm_fail = _insert_batch("techmap", tm_jobs)
+
     print()
 
     # 7. Verify — counts by source
@@ -260,6 +300,13 @@ def main():
     sf.close()
 
     # 8. Report
+    fail_by_source = {
+        "careerjet": cj_fail,
+        "tanqeeb":   tq_fail,
+        "jooble":    jb_fail,
+        "techmap":   tm_fail,
+    }
+
     print("=" * 55)
     print("BRONZE LOAD COMPLETE")
     print("=" * 55)
@@ -268,7 +315,7 @@ def main():
     print()
     print("  raw_jobs by source_name:")
     for source, count in by_source:
-        status = "OK" if (cj_fail if source == "careerjet" else tq_fail if source == "tanqeeb" else jb_fail) == 0 else "PARTIAL"
+        status = "OK" if fail_by_source.get(source, 0) == 0 else "PARTIAL"
         print(f"    {source:<12}: {count:>4} rows  [{status}]")
     print("=" * 55)
 
